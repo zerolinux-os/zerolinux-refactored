@@ -3,6 +3,7 @@
 # Zerolinux Refactored
 
 > A modern Rust project.
+<img width="1089" height="732" alt="zero" src="https://github.com/user-attachments/assets/781487d4-e08e-42a8-9b88-adafe0921e4b" />
 
 <br/>
 
