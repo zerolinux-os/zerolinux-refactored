@@ -1,0 +1,658 @@
+// ZeroLinux Cleaner v3.0 — Main UI
+// Slint 1.x  •  No external widgets beyond std-widgets
+
+import { ScrollView } from "std-widgets.slint";
+
+// ── Data structs (must match Rust side exactly) ───────────────────────────────
+
+export struct StatData {
+    disk-used:         string,
+    disk-free:         string,
+    disk-total:        string,
+    disk-percent:      float,
+    mem-used:          string,
+    mem-total:         string,
+    mem-percent:       float,
+    cpu-usage:         string,
+    uptime:            string,
+    kernel:            string,
+    packages:          string,
+    orphans:           string,
+    cache-size:        string,
+    updates-available: string,
+    aur-helper:        string,
+    firewall-status:   string,
+    last-update:       string,
+}
+
+export struct TermEntry {
+    text:  string,
+    level: string,
+}
+
+export struct DiskEntry {
+    path:  string,
+    human: string,
+}
+
+// ── Sidebar Navigation Button ─────────────────────────────────────────────────
+
+component SideBtn inherits Rectangle {
+    in property <string> icon;
+    in property <string> label;
+    in property <bool>   active: false;
+    callback clicked;
+
+    height: 42px;
+    border-radius: 8px;
+    background: active ? #ff3cb4.with-alpha(0.18)
+              : (t.has-hover ? #ff3cb4.with-alpha(0.08) : transparent);
+    border-width: active ? 1px : 0px;
+    border-color: #ff3cb4.with-alpha(0.5);
+    animate background { duration: 100ms; }
+
+    t := TouchArea { clicked => { root.clicked(); } }
+
+    HorizontalLayout {
+        padding-left: 14px; spacing: 10px; alignment: center;
+        Text {
+            text: root.icon; font-size: 15px; vertical-alignment: center;
+            color: active ? #ff3cb4 : #8080b0;
+        }
+        Text {
+            text: root.label; font-size: 13px; vertical-alignment: center;
+            font-weight: active ? 700 : 400;
+            color: active ? #ff3cb4 : #a0a0c8;
+        }
+    }
+}
+
+// ── Stat Card ─────────────────────────────────────────────────────────────────
+
+component StatCard inherits Rectangle {
+    in property <string> icon;
+    in property <string> label;
+    in property <string> value;
+    in property <float>  bar-value: 0.0;
+    in property <color>  accent: #00c8ff;
+
+    border-radius: 10px;
+    background: #1a1a2e;
+    border-width: 1px;
+    border-color: accent.with-alpha(0.22);
+
+    VerticalLayout {
+        padding: 14px; spacing: 5px;
+        HorizontalLayout {
+            spacing: 7px;
+            Text { text: root.icon; font-size: 16px; }
+            Text { text: root.label; font-size: 11px; color: #6060a0; vertical-alignment: center; }
+        }
+        Text { text: root.value; font-size: 15px; font-weight: 700; color: root.accent; }
+        if root.bar-value > 0.0: Rectangle {
+            height: 4px; border-radius: 2px; background: #ffffff.with-alpha(0.07);
+            Rectangle {
+                x: 0; y: 0; height: 4px; border-radius: 2px;
+                width: parent.width * root.bar-value;
+                background: root.accent;
+                animate width { duration: 800ms; easing: ease-out; }
+            }
+        }
+    }
+}
+
+// ── Action Button ─────────────────────────────────────────────────────────────
+
+component RunBtn inherits Rectangle {
+    in property <string> icon;
+    in property <string> label;
+    in property <string> sublabel;
+    in property <color>  accent: #ff3cb4;
+    in property <bool>   disabled: false;
+    callback clicked;
+
+    height: 68px;
+    border-radius: 10px;
+    background: t.has-hover && !disabled ? accent.with-alpha(0.12) : #1a1a2e;
+    border-width: 1px;
+    border-color: t.has-hover && !disabled ? accent.with-alpha(0.6) : accent.with-alpha(0.22);
+    opacity: disabled ? 0.45 : 1.0;
+    animate background   { duration: 100ms; }
+    animate border-color { duration: 100ms; }
+
+    t := TouchArea {
+        mouse-cursor: disabled ? default : pointer;
+        clicked => { if (!root.disabled) { root.clicked(); } }
+    }
+    HorizontalLayout {
+        padding-left: 18px; padding-right: 18px; spacing: 14px; alignment: center;
+        Text { text: root.icon; font-size: 24px; vertical-alignment: center; color: root.accent; }
+        VerticalLayout {
+            alignment: center; spacing: 3px;
+            Text { text: root.label; font-size: 14px; font-weight: 700; color: t.has-hover ? root.accent : #e0e0f8; }
+            Text { text: root.sublabel; font-size: 11px; color: #5050a0; }
+        }
+        Rectangle { horizontal-stretch: 1; }
+        Text { text: "▶"; font-size: 14px; color: root.accent; opacity: t.has-hover ? 1.0 : 0.25; vertical-alignment: center; }
+    }
+}
+
+// ── Terminal Output Line ──────────────────────────────────────────────────────
+
+component TermLine inherits Rectangle {
+    in property <TermEntry> entry;
+    height: 22px;
+    background: transparent;
+    HorizontalLayout {
+        padding-left: 12px; spacing: 8px; alignment: center;
+        Text {
+            text: entry.level == "error"   ? "✗" :
+                  entry.level == "success" ? "✓" :
+                  entry.level == "cmd"     ? "$" :
+                  entry.level == "info"    ? "─" : "·";
+            font-size: 11px; min-width: 14px; vertical-alignment: center;
+            color: entry.level == "error"   ? #ff4444 :
+                   entry.level == "success" ? #39ff14 :
+                   entry.level == "cmd"     ? #ffdc00 :
+                   entry.level == "info"    ? #ff3cb4 : #4060a0;
+        }
+        Text {
+            text: entry.text; font-size: 12px; vertical-alignment: center;
+            horizontal-stretch: 1; overflow: elide;
+            color: entry.level == "error"   ? #ff7777 :
+                   entry.level == "success" ? #88ee88 :
+                   entry.level == "cmd"     ? #ffee88 :
+                   entry.level == "info"    ? #c0a0ff : #8090b8;
+        }
+    }
+}
+
+// ── Main Window follows below ─────────────────────────────────────────────────
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+//  MAIN WINDOW
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+export component MainWindow inherits Window {
+    title: "ZeroLinux Cleaner";
+    min-width: 980px;
+    min-height: 640px;
+    preferred-width: 1080px;
+    preferred-height: 700px;
+    background: #0f0f1e;
+
+    // ── State ──
+    in-out property <int>          view: 0;
+    in-out property <int>          prev-view: 0;
+    in-out property <string>       term-title: "";
+    in-out property <bool>         busy: false;
+    in-out property <bool>         refreshing: false;
+    in-out property <float>        progress: 0.0;
+    in-out property <[TermEntry]>  term-entries: [];
+    in-out property <StatData>     stats;
+    in-out property <bool>         sched-enabled: false;
+    in-out property <string>       sched-interval: "weekly";
+    in-out property <[DiskEntry]>  disk-entries: [];
+
+    // ── Callbacks (wired to Rust in main.rs) ──
+    callback do-quick-clean();
+    callback do-full-clean();
+    callback do-update();
+    callback do-update-clean();
+    callback refresh-stats();
+    callback analyze-disk();
+    callback toggle-scheduler(bool, string);
+
+    // ════════════════ SIDEBAR ════════════════════════════════════════════════
+
+    Rectangle {
+        x: 0; y: 0; width: 220px; height: parent.height;
+        background: #0a0a18;
+
+        // Right border
+        Rectangle {
+            x: parent.width - 1px; y: 0;
+            width: 1px; height: parent.height;
+            background: #ff3cb4.with-alpha(0.14);
+        }
+
+        VerticalLayout {
+            padding-top: 16px; padding-bottom: 16px;
+            padding-left: 10px; padding-right: 10px;
+            spacing: 3px;
+
+            // Logo
+            Rectangle {
+                height: 64px;
+                HorizontalLayout {
+                    padding-left: 8px; spacing: 10px; alignment: center;
+                    Image {
+                        source: @image-url("zero.png");
+                        width: 42px;
+                        height: 42px;
+                        image-fit: contain;
+                    }
+                    VerticalLayout {
+                        alignment: center; spacing: 1px;
+                        Text { text: "ZeroLinux"; font-size: 14px; font-weight: 700; color: #ff3cb4; }
+                        Text { text: "Cleaner v3.0"; font-size: 10px; color: #00c8ff; opacity: 0.65; }
+                    }
+                }
+            }
+
+            Rectangle { height: 1px; background: #ff3cb4.with-alpha(0.1); }
+            Rectangle { height: 4px; }
+
+            SideBtn { icon: "⌂"; label: "Dashboard";    active: view == 0; clicked => { view = 0; } }
+            SideBtn { icon: "🧹"; label: "Clean System"; active: view == 1; clicked => { view = 1; } }
+            SideBtn { icon: "⬆"; label: "Update System"; active: view == 2; clicked => { view = 2; } }
+            SideBtn { icon: "💿"; label: "Disk Analyzer"; active: view == 4; clicked => { view = 4; } }
+
+            Rectangle { height: 4px; }
+            Rectangle { height: 1px; background: #ff3cb4.with-alpha(0.1); }
+            Rectangle { height: 4px; }
+
+            // Quick-launch shortcuts
+            SideBtn { icon: "⚡"; label: "Quick Clean"; active: false;
+                clicked => {
+                    if (!busy) {
+                        prev-view = 1; term-title = "Quick Clean"; view = 3;
+                        do-quick-clean();
+                    }
+                }
+            }
+            SideBtn { icon: "🚀"; label: "One-Click Maintenance"; active: false;
+                clicked => {
+                    if (!busy) {
+                        prev-view = 2; term-title = "Update + Full Clean"; view = 3;
+                        do-update-clean();
+                    }
+                }
+            }
+
+            Rectangle { vertical-stretch: 1; }
+
+            // Status indicator
+            Rectangle {
+                height: 34px; border-radius: 7px;
+                background: busy ? #ff3cb4.with-alpha(0.1) : #39ff14.with-alpha(0.06);
+                border-width: 1px;
+                border-color: busy ? #ff3cb4.with-alpha(0.3) : #39ff14.with-alpha(0.18);
+                animate background { duration: 200ms; }
+                HorizontalLayout {
+                    padding-left: 10px; spacing: 7px; alignment: center;
+                    Rectangle {
+                        width: 7px; height: 7px; border-radius: 3.5px;
+                        background: busy ? #ff3cb4 : #39ff14;
+                    }
+                    Text {
+                        text: busy ? "Running..." : "Ready";
+                        font-size: 12px; vertical-alignment: center;
+                        color: busy ? #ff3cb4 : #39ff14;
+                    }
+                }
+            }
+        }
+    }
+
+    // ════════════════ CONTENT AREA ══════════════════════════════════════════
+
+    Rectangle {
+        x: 220px; y: 0;
+        width: parent.width - 220px;
+        height: parent.height;
+        background: #0f0f1e;
+
+        // ═══ VIEW 0: DASHBOARD ═══════════════════════════════════════════════
+        if view == 0: VerticalLayout {
+            padding: 26px; spacing: 16px;
+
+            HorizontalLayout {
+                spacing: 12px;
+                VerticalLayout {
+                    spacing: 2px;
+                    Text { text: "Dashboard"; font-size: 22px; font-weight: 700; color: #ff3cb4; }
+                    Text {
+                        text: refreshing ? "Refreshing stats..." : "Live system statistics";
+                        font-size: 12px;
+                        color: refreshing ? #00c8ff : #404070;
+                    }
+                }
+                Rectangle { horizontal-stretch: 1; }
+                Rectangle {
+                    width: 120px; height: 34px; border-radius: 7px;
+                    background: refreshing ? #00c8ff.with-alpha(0.14)
+                              : (rb.has-hover ? #00c8ff.with-alpha(0.14) : #00c8ff.with-alpha(0.07));
+                    border-width: 1px;
+                    border-color: refreshing ? #00c8ff.with-alpha(0.8) : #00c8ff.with-alpha(0.35);
+                    animate background { duration: 100ms; }
+                    Text {
+                        text: refreshing ? "⟳  Refreshing..." : "⟳  Refresh";
+                        font-size: 12px; color: #00c8ff;
+                        horizontal-alignment: center; vertical-alignment: center;
+                    }
+                    rb := TouchArea {
+                        mouse-cursor: refreshing ? default : pointer;
+                        clicked => { if (!refreshing) { root.refresh-stats(); } }
+                    }
+                }
+            }
+
+            Rectangle {
+                height: 1px;
+                background: @linear-gradient(90deg, #ff3cb4.with-alpha(0.35), #00c8ff.with-alpha(0.2), transparent);
+            }
+
+            GridLayout {
+                spacing: 10px;
+                Row {
+                    StatCard { icon: "💾"; label: "Disk";   value: stats.disk-used + " / " + stats.disk-total; bar-value: stats.disk-percent; accent: #ff3cb4; }
+                    StatCard { icon: "🧠"; label: "Memory"; value: stats.mem-used  + " / " + stats.mem-total;  bar-value: stats.mem-percent;  accent: #00c8ff; }
+                    StatCard { icon: "⚡"; label: "CPU";    value: stats.cpu-usage; accent: #b43cff; }
+                }
+                Row {
+                    StatCard { icon: "📦"; label: "Packages"; value: stats.packages;                         accent: #39ff14; }
+                    StatCard { icon: "🔄"; label: "Updates";  value: stats.updates-available + " available"; accent: #ffdc00; }
+                    StatCard { icon: "🗑";  label: "Cache";    value: stats.cache-size;                       accent: #ff6b35; }
+                }
+                Row {
+                    StatCard { icon: "👻"; label: "Orphans"; value: stats.orphans;  accent: #ff3232; }
+                    StatCard { icon: "⏱"; label: "Uptime";  value: stats.uptime;   accent: #00c8ff; }
+                    StatCard { icon: "🐧"; label: "Kernel";  value: stats.kernel;   accent: #ff3cb4; }
+                }
+            }
+
+            HorizontalLayout {
+                spacing: 10px;
+                Rectangle {
+                    horizontal-stretch: 1; height: 34px; border-radius: 7px;
+                    background: #1a1a2e; border-width: 1px; border-color: #39ff14.with-alpha(0.18);
+                    HorizontalLayout {
+                        padding-left: 12px; spacing: 8px; alignment: center;
+                        Text { text: "🛡"; font-size: 12px; vertical-alignment: center; }
+                        Text { text: "Firewall: " + stats.firewall-status; font-size: 12px; color: #39ff14; vertical-alignment: center; }
+                    }
+                }
+                Rectangle {
+                    horizontal-stretch: 1; height: 34px; border-radius: 7px;
+                    background: #1a1a2e; border-width: 1px; border-color: #00c8ff.with-alpha(0.18);
+                    HorizontalLayout {
+                        padding-left: 12px; spacing: 8px; alignment: center;
+                        Text { text: "🔧"; font-size: 12px; vertical-alignment: center; }
+                        Text { text: "AUR: " + stats.aur-helper; font-size: 12px; color: #00c8ff; vertical-alignment: center; }
+                    }
+                }
+                Rectangle {
+                    horizontal-stretch: 1; height: 34px; border-radius: 7px;
+                    background: #1a1a2e; border-width: 1px; border-color: #ff3cb4.with-alpha(0.18);
+                    HorizontalLayout {
+                        padding-left: 12px; spacing: 8px; alignment: center;
+                        Text { text: "📅"; font-size: 12px; vertical-alignment: center; }
+                        Text { text: "Updated: " + stats.last-update; font-size: 12px; color: #ff3cb4; vertical-alignment: center; }
+                    }
+                }
+            }
+        }
+
+        // ═══ VIEW 1: CLEAN ═══════════════════════════════════════════════════
+        if view == 1: VerticalLayout {
+            padding: 26px; spacing: 16px;
+            VerticalLayout {
+                spacing: 2px;
+                Text { text: "Clean System"; font-size: 22px; font-weight: 700; color: #ff3cb4; }
+                Text { text: "Remove orphans • cache • temp files • browser cache"; font-size: 12px; color: #404070; }
+            }
+            Rectangle { height: 1px; background: @linear-gradient(90deg, #ff3cb4.with-alpha(0.35), transparent); }
+
+            // Info: orphans + cache pre-clean info
+            Rectangle {
+                height: 44px; border-radius: 8px;
+                background: #ff3cb4.with-alpha(0.05);
+                border-width: 1px; border-color: #ff3cb4.with-alpha(0.15);
+                HorizontalLayout {
+                    padding-left: 14px; spacing: 8px; alignment: center;
+                    Text { text: "ℹ"; font-size: 14px; vertical-alignment: center; color: #ff3cb4; }
+                    Text {
+                        text: stats.orphans + " orphans  •  " + stats.cache-size + " cache  •  " + stats.updates-available + " updates pending";
+                        font-size: 12px; color: #ff3cb4; opacity: 0.8; vertical-alignment: center;
+                    }
+                }
+            }
+
+            RunBtn {
+                icon: "⚡"; label: "Quick Clean";
+                sublabel: "Orphans • Package cache (keep 1) • /tmp • /var/tmp";
+                accent: #00c8ff; disabled: busy;
+                clicked => { prev-view = 1; term-title = "Quick Clean"; view = 3; do-quick-clean(); }
+            }
+            RunBtn {
+                icon: "🧹"; label: "Full Clean";
+                sublabel: "Quick + Journal • Browser cache • Python cache • Thumbnails • AUR cache";
+                accent: #ff3cb4; disabled: busy;
+                clicked => { prev-view = 1; term-title = "Full Clean"; view = 3; do-full-clean(); }
+            }
+            Rectangle { vertical-stretch: 1; }
+        }
+
+        // ═══ VIEW 2: UPDATE ══════════════════════════════════════════════════
+        if view == 2: VerticalLayout {
+            padding: 26px; spacing: 16px;
+            VerticalLayout {
+                spacing: 2px;
+                Text { text: "Update System"; font-size: 22px; font-weight: 700; color: #00c8ff; }
+                Text { text: "pacman • AUR (" + stats.aur-helper + ") • Flatpak"; font-size: 12px; color: #404070; }
+            }
+            Rectangle { height: 1px; background: @linear-gradient(90deg, #00c8ff.with-alpha(0.35), transparent); }
+
+            Rectangle {
+                height: 44px; border-radius: 8px;
+                background: #ffdc00.with-alpha(0.06); border-width: 1px; border-color: #ffdc00.with-alpha(0.2);
+                HorizontalLayout {
+                    padding-left: 14px; spacing: 8px; alignment: center;
+                    Text { text: "📦"; font-size: 14px; vertical-alignment: center; }
+                    Text { text: stats.updates-available + " packages available for update"; font-size: 12px; color: #ffdc00; vertical-alignment: center; }
+                }
+            }
+
+            RunBtn {
+                icon: "⬆"; label: "Update System";
+                sublabel: "Sync databases → pacman -Syu → AUR → Flatpak";
+                accent: #00c8ff; disabled: busy;
+                clicked => { prev-view = 2; term-title = "System Update"; view = 3; do-update(); }
+            }
+            RunBtn {
+                icon: "🚀"; label: "One-Click Maintenance";
+                sublabel: "Full system update followed by complete cleanup";
+                accent: #39ff14; disabled: busy;
+                clicked => { prev-view = 2; term-title = "Update + Full Clean"; view = 3; do-update-clean(); }
+            }
+            Rectangle { vertical-stretch: 1; }
+
+            // Scheduler
+            Rectangle {
+                height: 54px; border-radius: 10px;
+                background: sched-enabled ? #39ff14.with-alpha(0.07) : #1a1a2e;
+                border-width: 1px;
+                border-color: sched-enabled ? #39ff14.with-alpha(0.3) : #ffffff.with-alpha(0.06);
+                animate background { duration: 200ms; }
+                HorizontalLayout {
+                    padding-left: 16px; padding-right: 16px; spacing: 12px; alignment: center;
+                    Text { text: "⏰"; font-size: 16px; vertical-alignment: center; }
+                    VerticalLayout {
+                        alignment: center; spacing: 1px;
+                        Text { text: "Auto Scheduler"; font-size: 13px; font-weight: 600; color: sched-enabled ? #39ff14 : #c0c0e0; }
+                        Text { text: sched-enabled ? "Active — " + sched-interval : "Enable automatic maintenance"; font-size: 10px; color: #404070; }
+                    }
+                    Rectangle { horizontal-stretch: 1; }
+                    Rectangle {
+                        width: 46px; height: 24px; border-radius: 12px;
+                        background: sched-enabled ? #39ff14 : #ffffff.with-alpha(0.12);
+                        animate background { duration: 200ms; }
+                        Rectangle {
+                            x: sched-enabled ? 23px : 2px; y: 2px;
+                            width: 20px; height: 20px; border-radius: 10px; background: white;
+                            animate x { duration: 200ms; easing: ease-in-out; }
+                        }
+                        st := TouchArea {
+                            mouse-cursor: pointer;
+                            clicked => {
+                                sched-enabled = !sched-enabled;
+                                root.toggle-scheduler(sched-enabled, sched-interval);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // ═══ VIEW 3: TERMINAL OUTPUT ══════════════════════════════════════════
+        if view == 3: VerticalLayout {
+            padding: 20px; spacing: 12px;
+
+            HorizontalLayout {
+                spacing: 12px; alignment: center;
+                Rectangle {
+                    width: 88px; height: 34px; border-radius: 7px;
+                    background: bt.has-hover ? #ff3cb4.with-alpha(0.12) : #1a1a2e;
+                    border-width: 1px; border-color: #ff3cb4.with-alpha(0.3);
+                    animate background { duration: 100ms; }
+                    HorizontalLayout { spacing: 6px; alignment: center;
+                        Text { text: "←"; font-size: 15px; color: #ff3cb4; vertical-alignment: center; }
+                        Text { text: "Back"; font-size: 12px; font-weight: 600; color: #ff3cb4; vertical-alignment: center; }
+                    }
+                    bt := TouchArea {
+                        mouse-cursor: busy ? default : pointer;
+                        clicked => { if (!busy) { view = prev-view; } }
+                    }
+                }
+                VerticalLayout {
+                    spacing: 2px;
+                    Text { text: term-title; font-size: 18px; font-weight: 700; color: #ff3cb4; }
+                    Text {
+                        text: busy ? "● Running — please wait..." : "✓ Completed";
+                        font-size: 11px;
+                        color: busy ? #ffdc00 : #39ff14;
+                    }
+                }
+                Rectangle { horizontal-stretch: 1; }
+                Rectangle {
+                    width: 180px; height: 34px; border-radius: 7px;
+                    background: #1a1a2e; border-width: 1px; border-color: #ff3cb4.with-alpha(0.2);
+                    VerticalLayout {
+                        padding-left: 10px; padding-right: 10px; padding-top: 6px; padding-bottom: 6px; spacing: 4px;
+                        Text { text: busy ? "Processing..." : "Done"; font-size: 10px; color: busy ? #ff3cb4 : #39ff14; }
+                        Rectangle {
+                            height: 4px; border-radius: 2px; background: #ffffff.with-alpha(0.07);
+                            Rectangle {
+                                x: 0; y: 0; height: 4px; border-radius: 2px;
+                                width: parent.width * progress;
+                                background: busy ? #ff3cb4 : #39ff14;
+                                animate width { duration: 200ms; }
+                            }
+                        }
+                    }
+                }
+            }
+
+            Rectangle { height: 1px; background: @linear-gradient(90deg, #ff3cb4.with-alpha(0.3), #00c8ff.with-alpha(0.15), transparent); }
+
+            Rectangle {
+                vertical-stretch: 1; border-radius: 10px;
+                background: #060610; border-width: 1px; border-color: #ff3cb4.with-alpha(0.14);
+                VerticalLayout {
+                    Rectangle {
+                        height: 28px; border-radius: 8px; background: #0c0c1e;
+                        HorizontalLayout {
+                            padding-left: 10px; padding-right: 14px; spacing: 6px; alignment: center;
+                            Rectangle { width: 10px; height: 10px; border-radius: 5px; background: #ff5f57; }
+                            Rectangle { width: 10px; height: 10px; border-radius: 5px; background: #ffbd2e; }
+                            Rectangle { width: 10px; height: 10px; border-radius: 5px; background: #28c840; }
+                            Rectangle { horizontal-stretch: 1; }
+                            Text { text: "zerolinux-cleaner — output"; font-size: 10px; color: #303060; vertical-alignment: center; }
+                            Rectangle { horizontal-stretch: 1; }
+                        }
+                    }
+                    ScrollView {
+                        vertical-stretch: 1;
+                        VerticalLayout {
+                            padding-top: 4px; padding-bottom: 4px; spacing: 0px; alignment: start;
+                            for entry in term-entries: TermLine { entry: entry; }
+                            if busy: Rectangle {
+                                height: 22px;
+                                HorizontalLayout {
+                                    padding-left: 12px; spacing: 4px; alignment: center;
+                                    Text { text: "❯"; font-size: 11px; color: #39ff14; vertical-alignment: center; }
+                                    Rectangle { width: 8px; height: 14px; border-radius: 1px; background: #39ff14; opacity: 0.8; }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            if !busy: Rectangle {
+                height: 44px; border-radius: 8px;
+                background: #39ff14.with-alpha(0.06); border-width: 1px; border-color: #39ff14.with-alpha(0.2);
+                HorizontalLayout {
+                    padding-left: 14px; spacing: 10px; alignment: center;
+                    Text { text: "✓"; font-size: 16px; color: #39ff14; vertical-alignment: center; }
+                    Text { text: "Operation completed. Press ← Back to return."; font-size: 12px; color: #39ff14; opacity: 0.8; vertical-alignment: center; }
+                }
+            }
+        }
+
+        // ═══ VIEW 4: DISK ANALYZER ════════════════════════════════════════════
+        if view == 4: VerticalLayout {
+            padding: 26px; spacing: 16px;
+            HorizontalLayout {
+                spacing: 12px;
+                VerticalLayout {
+                    spacing: 2px;
+                    Text { text: "Disk Analyzer"; font-size: 22px; font-weight: 700; color: #b43cff; }
+                    Text { text: "Largest directories in /var • /home • /usr • /opt"; font-size: 12px; color: #404070; }
+                }
+                Rectangle { horizontal-stretch: 1; }
+                Rectangle {
+                    width: 118px; height: 34px; border-radius: 7px;
+                    background: sa.has-hover ? #b43cff.with-alpha(0.14) : #b43cff.with-alpha(0.07);
+                    border-width: 1px; border-color: #b43cff.with-alpha(0.35);
+                    animate background { duration: 100ms; }
+                    Text { text: "⟳  Scan Disk"; font-size: 12px; color: #b43cff; horizontal-alignment: center; vertical-alignment: center; }
+                    sa := TouchArea { mouse-cursor: pointer; clicked => { root.analyze-disk(); } }
+                }
+            }
+            Rectangle { height: 1px; background: @linear-gradient(90deg, #b43cff.with-alpha(0.35), transparent); }
+
+            if disk-entries.length == 0: Rectangle {
+                vertical-stretch: 1;
+                VerticalLayout {
+                    alignment: center; spacing: 10px;
+                    Text { text: "💿"; font-size: 48px; horizontal-alignment: center; }
+                    Text { text: "Press \"Scan Disk\" to analyze usage"; font-size: 14px; color: #404070; horizontal-alignment: center; }
+                }
+            }
+            if disk-entries.length > 0: ScrollView {
+                vertical-stretch: 1;
+                VerticalLayout {
+                    padding: 4px; spacing: 4px;
+                    for entry in disk-entries: Rectangle {
+                        height: 36px; border-radius: 7px;
+                        background: #1a1a2e;
+                        border-width: 1px; border-color: #b43cff.with-alpha(0.14);
+                        HorizontalLayout {
+                            padding-left: 14px; padding-right: 14px; spacing: 12px; alignment: center;
+                            Text {
+                                text: entry.path; font-size: 12px; color: #a0a0c8;
+                                vertical-alignment: center; horizontal-stretch: 1; overflow: elide;
+                            }
+                            Text {
+                                text: entry.human; font-size: 13px; font-weight: 700; color: #b43cff;
+                                vertical-alignment: center;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
